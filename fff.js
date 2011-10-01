@@ -10,7 +10,7 @@ window.onload = function()
 	// FPS(ゲームスピード。多いと滑らかだが負荷が高い)
 	var FPS = 30;
 	// 1フレーム中何回移動処理を行うか(当たり判定の精度が上がる)
-	var FRAME_DIVISION = 1;
+	var FRAME_DIVISION = 3;
 	// 主人公の加速度
 	var FUNYA_ACCELERATION = 900.0;
 	// 主人公の最高速
@@ -23,16 +23,34 @@ window.onload = function()
 	var NEEDLE_ACCELERATION_FIRST = FUNYA_ACCELERATION*0.5;
 	// 敵の加速度下限
 	var NEEDLE_ACCELERATION_MIN = FUNYA_ACCELERATION*0.5;
-	// 敵の加速度下限
+	// 敵の加速度上限
 	var NEEDLE_ACCELERATION_MAX = FUNYA_ACCELERATION*1.2;
 	// 敵の最高速度初期値
 	var NEEDLE_MAXSPEED_FIRST = FUNYA_MAXSPEED*1.5;
 	// 敵の最高速度下限
 	var NEEDLE_MAXSPEED_MIN = FUNYA_MAXSPEED*0.8;
-	// 敵の最高速度下限
+	// 敵の最高速度上限
 	var NEEDLE_MAXSPEED_MAX = FUNYA_MAXSPEED*1.5;
 	// 敵の増殖時間
 	var NEEDLE_INCREASE_CYCLE = 5.0;
+	// 敵の進路予測開始時間
+	var NEEDLE_FORECAST_START = 60.0;
+	// 敵の進路予測完了時間
+	var NEEDLE_FORECAST_END = 120.0;
+	// スコアの表示色
+	var SCORE_COLOR = 'black';
+	// スコアの表示フォント
+	var SCORE_FONT = 'sans-serif';
+	// スコアの表示サイズ
+	var SCORE_SIZE = 24;
+	// メッセージの表示色
+	var MESSAGE_COLOR = 'red';
+	// スコアの表示フォント
+	var MESSAGE_FONT = 'sans-serif';
+	// メッセージの表示サイズ
+	var MESSAGE_SIZE = 48;
+	// 当たり判定の大きさ
+	var HIT_RANGE = 16;
 
 	// 変数
 	var horizontal;
@@ -42,15 +60,19 @@ window.onload = function()
 	var game;
 	var tile_size;
 	var mouse_r_x, mouse_r_y, mouse_r_on;	// リアルタイム情報(X, Y, ボタン押下)
-	var mouse_x, mouse_y, mouse_on;	// フレーム中固定情報(X, Y, ボタン押下)
+	var mouse_x, mouse_y, mouse_on, mouse_push;	// フレーム中固定情報(X, Y, ボタン押下、ボタンたった今押下)
 	var mouse_v_x, mouse_v_y, mouse_v_vel;	// 仮想空間上の情報(X, Y, 大きさ)
 	var map;
 	var mapData;
 	var mapchip_offset;
 	var funya;
 	var needles;
+	var needleGroup;
 	var score;
 	var frame_time;
+	var scoreLabel;
+	var messageLabel;
+	var running;
 
 	construct();
 	game.start();
@@ -60,6 +82,8 @@ window.onload = function()
 		// 定数の補正
 		var innerfps = FPS*FRAME_DIVISION;
 		NEEDLE_INCREASE_CYCLE = Math.ceil(NEEDLE_INCREASE_CYCLE*innerfps);
+		NEEDLE_FORECAST_START = Math.ceil(NEEDLE_FORECAST_START*innerfps);
+		NEEDLE_FORECAST_END = Math.ceil(NEEDLE_FORECAST_END*innerfps);
 		frame_time = 1.0/innerfps;
 
 		// サイズ設定
@@ -84,14 +108,22 @@ window.onload = function()
 		game.fps = FPS;
 
 		// イベント
-		game.onload = startgame;
+		game.onload = onload;
 		game.currentScene.addEventListener(enchant.Event.ENTER_FRAME, enterframe);
 		game.currentScene.addEventListener(enchant.Event.TOUCH_START, touchstart);
 		game.currentScene.addEventListener(enchant.Event.TOUCH_MOVE, touchmove);
 		game.currentScene.addEventListener(enchant.Event.TOUCH_END, touchend);
+
+		// 入力初期値
+		mouse_push = true;
+		running = false;
+		score = 0;
+
+		// 敵
+		needleGroup = null;
 	}
 
-	function startgame()
+	function onload()
 	{
 		// マップ
 		map = new Map(tile_size, tile_size);
@@ -121,20 +153,48 @@ window.onload = function()
 		funya.addEventListener(enchant.Event.RENDER, chara_render);
 		game.currentScene.addChild(funya);
 
+		// 得点ラベル
+		scoreLabel = new Label();
+		scoreLabel.color = SCORE_COLOR;
+		scoreLabel.font = SCORE_SIZE+'px '+SCORE_FONT;
+		scoreLabel.text = 'Score:0';
+		scoreLabel.width = width;
+		scoreLabel.height = SCORE_SIZE;
+		scoreLabel.x = SCORE_SIZE/2;
+		scoreLabel.y = SCORE_SIZE/2;
+		scoreLabel.addEventListener(enchant.Event.RENDER, function() { this.text = 'Score:'+score; });
+		game.currentScene.addChild(scoreLabel);
+
+		// メッセージラベル
+		messageLabel = new Label();
+		messageLabel.color = MESSAGE_COLOR;
+		messageLabel.font = MESSAGE_SIZE+'px '+MESSAGE_FONT;
+		messageLabel.text = 'ふわふわふにゃ';
+		messageLabel.width = MESSAGE_SIZE*messageLabel.text.length;
+		messageLabel.height = MESSAGE_SIZE;
+		messageLabel.x = center_x-messageLabel.width/2;
+		messageLabel.y = height-messageLabel.height-MESSAGE_SIZE/2;
+		game.currentScene.addChild(messageLabel);
+	}
+
+	function startgame()
+	{
+		// 主人公
+		funya.v_x  = funya.v_y  = 0.0;
+		funya.v_vx = funya.v_vy = 0.0;
+		funya.v_ax = funya.v_ay = 0.0;
+
 		// 敵
 		needles = new Array();
-		needles[0] = new Sprite(tile_size, tile_size);
-		needles[0].image = game.assets['needle.png'];
-		needles[0].v_x  = needles[0].v_y  = -200.0;
-		needles[0].v_vx = needles[0].v_vy = 0.0;
-		needles[0].v_ax = needles[0].v_ay = 0.0;
-		needles[0].acceleration = NEEDLE_ACCELERATION_FIRST;
-		needles[0].limitter = getlimitter(NEEDLE_ACCELERATION_FIRST, NEEDLE_MAXSPEED_FIRST);
-		needles[0].onmove = needle_onmove;
-		needles[0].addEventListener(enchant.Event.RENDER, chara_render);
-		game.currentScene.addChild(needles[0]);
+		needles[0] = firstneedle();
+		if (needleGroup) game.currentScene.removeChild(needleGroup);
+		needleGroup = new Group();
+		needleGroup.addChild(needles[0]);
+		game.currentScene.insertBefore(needleGroup, scoreLabel);
 
 		score = 0;
+		running = true;
+		game.currentScene.removeChild(messageLabel);
 	}
 
 	function new_mapchip(x, y)
@@ -150,17 +210,59 @@ window.onload = function()
 	function enterframe(e)
 	{
 		updateinput();
-		for (var i=0; i<FRAME_DIVISION; i++) {
-			score++;
-			if (score%NEEDLE_INCREASE_CYCLE==0) {
-				increaseneedle();
-			}
-			funya.onmove();
-			for (var n=0; n<needles.length; n++) {
-				needles[n].onmove();
+		if (!running) {
+			if (mouse_push) {
+				startgame();
+				mouse_push = false;
 			}
 		}
-		scroll();
+		if (running) {
+			for (var i=0; i<FRAME_DIVISION; i++) {
+				score++;
+				if (score%NEEDLE_INCREASE_CYCLE==0) {
+					increaseneedle();
+				}
+				funya.onmove();
+				for (var n=0; n<needles.length; n++) {
+					needles[n].onmove();
+				}
+				hitCheck();
+				if (!running) return;
+			}
+			scroll();
+		}
+	}
+
+	function firstneedle()
+	{
+		var needle;
+		needle = new Sprite(tile_size, tile_size);
+		needle.image = game.assets['needle.png'];
+		var position = Math.random()*(width*2+height*2);
+		if (position<width) {
+			needle.v_x = position;
+			needle.v_y = -tile_size*0.5;
+		}else if (position<width+height) {
+			needle.v_x = width+tile_size*0.5;
+			needle.v_y = position-width;
+		}else if (position<width*2+height) {
+			needle.v_x = width-(position-(width+height));
+			needle.v_y = height+tile_size*0.5;
+		}else {
+			needle.v_x = width+tile_size*0.5;
+			needle.v_y = height-(position-(width*2+height));
+		}
+		needle.v_x -= center_x;
+		needle.v_y -= center_y;
+		needle.v_vx = needle.v_vy = 0.0;
+		needle.v_ax = needle.v_ay = 0.0;
+		needle.forecast = 0.0;
+		needle.acceleration = NEEDLE_ACCELERATION_FIRST;
+		needle.maxspeed = NEEDLE_MAXSPEED_FIRST;
+		needle.limitter = getlimitter(needle.acceleration, needle.maxspeed);
+		needle.onmove = needle_onmove;
+		needle.addEventListener(enchant.Event.RENDER, chara_render);
+		return needle;
 	}
 
 	function increaseneedle()
@@ -168,10 +270,10 @@ window.onload = function()
 		// 初期値設定
 		var new_n  = needles.length;
 		var rand_n = Math.floor(Math.random() * new_n);
-		var new_a  = NEEDLE_ACCELERATION_MIN+Math.random() * (NEEDLE_ACCELERATION_MAX-NEEDLE_ACCELERATION_MIN);
-		var rand_a = NEEDLE_ACCELERATION_MIN+Math.random() * (NEEDLE_ACCELERATION_MAX-NEEDLE_ACCELERATION_MIN);
-		var new_s  = NEEDLE_MAXSPEED_MIN+Math.random() * (NEEDLE_MAXSPEED_MAX-NEEDLE_MAXSPEED_MIN);
-		var rand_s = NEEDLE_MAXSPEED_MIN+Math.random() * (NEEDLE_MAXSPEED_MAX-NEEDLE_MAXSPEED_MIN);
+		var new_a  = NEEDLE_ACCELERATION_MIN+Math.random()*(NEEDLE_ACCELERATION_MAX-NEEDLE_ACCELERATION_MIN);
+		var rand_a = NEEDLE_ACCELERATION_MIN+Math.random()*(NEEDLE_ACCELERATION_MAX-NEEDLE_ACCELERATION_MIN);
+		var new_s  = NEEDLE_MAXSPEED_MIN+Math.random()*(NEEDLE_MAXSPEED_MAX-NEEDLE_MAXSPEED_MIN);
+		var rand_s = NEEDLE_MAXSPEED_MIN+Math.random()*(NEEDLE_MAXSPEED_MAX-NEEDLE_MAXSPEED_MIN);
 
 		// 新キャラ追加
 		needles[new_n] = new Sprite(tile_size, tile_size);
@@ -182,17 +284,28 @@ window.onload = function()
 		needles[new_n].v_vy = needles[rand_n].v_vx;
 		needles[new_n].v_ax = 0.0;
 		needles[new_n].v_ay = 0.0;
+		needles[new_n].forecast = rand_forecast();
 		needles[new_n].acceleration = new_a;
+		needles[new_n].maxspeed = new_s;
 		needles[new_n].limitter = getlimitter(new_a, new_s);
 		needles[new_n].onmove = needle_onmove;
 		needles[new_n].addEventListener(enchant.Event.RENDER, chara_render);
-		game.currentScene.addChild(needles[new_n]);
+		needleGroup.addChild(needles[new_n]);
 
 		// 前のやつも反動で動かす
 		needles[rand_n].v_vx = -needles[new_n].v_vx;
 		needles[rand_n].v_vy = -needles[new_n].v_vy;
+		needles[rand_n].forecast = rand_forecast();
 		needles[rand_n].acceleration = rand_a;
+		needles[rand_n].maxspeed = rand_s;
 		needles[rand_n].limitter = getlimitter(rand_a, rand_s);
+	}
+
+	function rand_forecast()
+	{
+		if (score<=NEEDLE_FORECAST_START) return 0.0;
+		if (score>NEEDLE_FORECAST_END) return Math.random();
+		return Math.random()*(score-NEEDLE_FORECAST_START)/(NEEDLE_FORECAST_END-NEEDLE_FORECAST_START);
 	}
 
 	function touchstart(e)
@@ -217,7 +330,13 @@ window.onload = function()
 	{
 		mouse_x = mouse_r_x;
 		mouse_y = mouse_r_y;
-		mouse_on = mouse_r_on;
+		if (mouse_on) {
+			mouse_on = mouse_r_on;
+			mouse_push = false;
+		}else {
+			mouse_push = mouse_r_on;
+			mouse_on = mouse_push;
+		}
 
 		if (mouse_on) {
 			// 仮想入力更新
@@ -248,6 +367,15 @@ window.onload = function()
 		var dx = funya.v_x - this.v_x;
 		var dy = funya.v_y - this.v_y;
 		var d_2 = dx*dx+dy*dy;
+		if (this.forecast) {
+			// 進路予測を入れる
+			var arrival_time = Math.sqrt(d_2)/this.maxspeed;
+			var forecast_x = funya.v_x+funya.v_vx*arrival_time*this.forecast;
+			var forecast_y = funya.v_y+funya.v_vy*arrival_time*this.forecast;
+			dx = forecast_x - this.v_x;
+			dy = forecast_y - this.v_y;
+			d_2 = dx*dx+dy*dy;
+		}
 		if (d_2>0.0) {
 			this.v_ax = this.acceleration*dx/Math.sqrt(d_2);
 			this.v_ay = this.acceleration*dy/Math.sqrt(d_2);
@@ -367,5 +495,27 @@ window.onload = function()
 			}
 		}
 		map.loadData(mapData);
+	}
+
+	function hitCheck()
+	{
+		var hit = false;
+		for (var n=0; n<needles.length; n++) {
+			var dx = needles[n].v_x-funya.v_x;
+			var dy = needles[n].v_y-funya.v_y;
+			if (dx*dx+dy*dy<=HIT_RANGE*HIT_RANGE) {
+				hit = true;
+				break;
+			}
+		}
+		if (hit) {
+			messageLabel.text = 'ゲームオーバー';
+			messageLabel.width = MESSAGE_SIZE*messageLabel.text.length;
+			messageLabel.height = MESSAGE_SIZE;
+			messageLabel.x = center_x-messageLabel.width/2;
+			messageLabel.y = height-messageLabel.height-MESSAGE_SIZE/2;
+			game.currentScene.addChild(messageLabel);
+			running = false;
+		}
 	}
 };
