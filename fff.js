@@ -249,7 +249,7 @@ window.onload = function()
 			needle.v_x = width-(position-(width+height));
 			needle.v_y = height+tile_size*0.5;
 		}else {
-			needle.v_x = width+tile_size*0.5;
+			needle.v_x = -tile_size*0.5;
 			needle.v_y = height-(position-(width*2+height));
 		}
 		needle.v_x -= center_x;
