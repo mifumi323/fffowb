@@ -238,19 +238,13 @@ window.onload = function()
 		var needle;
 		needle = new Sprite(tile_size, tile_size);
 		needle.image = game.assets['needle.png'];
-		var position = Math.random()*(width*2+height*2);
+		var position = Math.random()*(width+height);
 		if (position<width) {
 			needle.v_x = position;
-			needle.v_y = -tile_size*0.5;
-		}else if (position<width+height) {
-			needle.v_x = width+tile_size*0.5;
-			needle.v_y = position-width;
-		}else if (position<width*2+height) {
-			needle.v_x = width-(position-(width+height));
-			needle.v_y = height+tile_size*0.5;
+			needle.v_y = ((mouse_v_y==0) ? (Math.random()<0.5) : (mouse_v_y>0)) ? -tile_size*0.5 : height+tile_size*0.5;
 		}else {
-			needle.v_x = -tile_size*0.5;
-			needle.v_y = height-(position-(width*2+height));
+			needle.v_x = ((mouse_v_x==0) ? (Math.random()<0.5) : (mouse_v_x>0)) ? -tile_size*0.5 : width+tile_size*0.5;
+			needle.v_y = position-width;
 		}
 		needle.v_x -= center_x;
 		needle.v_y -= center_y;
